@@ -1,0 +1,157 @@
+pipeline {
+    // Note: fixed label set from NUT CI farm since the overall
+    // checkout workspace is huge and so persistent, as well as
+    // lots of heavier tools are used and vetted to work well:
+    agent {
+        //label "jenkins-nut-doc-deb11"
+        label "nut-website-builder && nut-builder && doc-builder && NUT_BUILD_CAPS=docs:all"
+    }
+
+    options {
+        disableConcurrentBuilds()
+    }
+
+    parameters {
+        booleanParam(
+            name: 'CI_AUTOCOMMIT',
+            defaultValue: true,
+            description: 'Create the commits for site source and public?'
+        )
+        booleanParam(
+            name: 'CI_AUTOPUSH',
+            defaultValue: true,
+            description: 'Push the commits for site source and public?'
+        )
+        booleanParam(
+            name: 'CI_AVOID_RESPIN',
+            defaultValue: true,
+            description: 'Avoid needless work (site date changes etc) if nut-website and source components did not change in git'
+        )
+        booleanParam(
+            name: 'CI_AVOID_SPELLCHECK',
+            defaultValue: true,
+            description: 'If "true", the spellcheck of site files would be a separate action with a non-fatal diagnosis after a site build an push (best-effort FYI); if "false" then spelling issues vs. master nut/docs/nut.dict would be fatal before site build.'
+        )
+    }
+
+    stages {
+        stage("Build and optionally push") {
+            steps {
+                script {
+/*
+// TODO: Allow admin users to run the job and others not?
+// For now rely on Jenkins folder/job security matrix
+                    def causeUser = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.userId[0]
+                    def adminGroup = 'networkupstools'
+
+                    // May be null/not of wanted type if Role Strategy Plugin is missing
+                    def authStrategy = null
+                    try {
+                        authStrategy = Jenkins.instance.getAuthorizationStrategy()
+                        if (! (authStrategy instanceof RoleBasedAuthorizationStrategy) ) authStrategy=null
+                    } catch (Throwable t) {}
+
+                    def roleMaps = null
+                    def roleSids = null
+                    if (authStrategy) {
+                        try {
+                            roleMaps = authStrategy.getRoleMap(com.synopsys.arc.jenkins.plugins.rolestrategy.RoleType.Global)
+                            roleSids = roleMaps.getSidsForRole(adminGroup.trim())
+                        } catch (Throwable t) {}
+                    }
+*/
+
+                    if (env?.BRANCH_NAME == null) {
+                        if (env?.GIT_BRANCH) {
+                            env.BRANCH_NAME = env.GIT_BRANCH - ~/^origin\//
+                        } else {
+                            env.BRANCH_NAME = sh (
+                                script: 'git rev-parse --abbrev-ref HEAD',
+                                returnStdout: true
+                            ).trim()
+                        }
+                    }
+
+                    if (env.BRANCH_NAME != 'master'
+                    &&  !(env.BRANCH_NAME ==~ /^.*\/master$/ )
+                    ) {
+                        echo "WARNING: Not running for a master branch (${env.BRANCH_NAME}), disabling Git actions"
+                        env.CI_AUTOCOMMIT = false
+                        env.CI_AUTOPUSH = false
+                    } else {
+                        // Be ready to push later
+                        sh 'git checkout master && git rebase origin/master'
+                    }
+
+                    if (currentBuild.changeSets?.size() > 0) {
+                        echo "WARNING: Running with source changes known to CI, so not avoiding work"
+                        env.CI_AVOID_RESPIN = false
+                    } else
+                    for (cause in currentBuild.getBuildCauses()) {
+                        echo "Checking for code-change detecting build cause in: ${cause}"
+
+                        if (cause._class.toString().contains('GitHubPushCause')
+                        ||  cause._class.toString().contains('BranchEventCause')
+                        ||  cause._class.toString().contains('BranchIndexingCause')
+                        ) {
+                            echo "WARNING: Running due to an automated source change trigger, not avoiding work"
+                            env.CI_AVOID_RESPIN = false
+                        }
+                    }
+
+                    def shRes
+                    def msg
+                    echo "Starting website build: CI_AUTOCOMMIT=${env.CI_AUTOCOMMIT} CI_AUTOPUSH=${env.CI_AUTOPUSH} CI_AVOID_RESPIN=${env.CI_AVOID_RESPIN} CI_AVOID_SPELLCHECK=${env.CI_AVOID_SPELLCHECK} BRANCH_NAME=${env.BRANCH_NAME}"
+                    withCredentials([gitUsernamePassword(credentialsId: scm.getUserRemoteConfigs()[0].getCredentialsId())]) {
+                        // for git push in shell, using https://www.jenkins.io/blog/2021/07/27/git-credentials-binding-phase-1/
+                        shRes = sh (returnStatus: true, script: "./ci_build.sh")
+                    }
+                    switch (shRes) {
+                        case 0:
+                            if ("${env.CI_AUTOPUSH}" == "true") {
+                                msg = "Site updated"
+                            } else {
+                                msg = "Site regenerated successfully, but not pushed"
+                            }
+                            break
+
+                        case 42:
+                            msg = "Site already up to date, skipped"
+                            break
+
+                        default:
+                            msg = "FAILED to process site update"
+                            break
+                    }
+
+                    manager.addShortText(msg)
+                    echo msg
+                    if ( !(shRes in [0, 42]) ) {
+                        error msg
+                    }
+
+                    // NOTE: If there would be support for historic site publishing,
+                    // spellcheck for those snapshots can not be impacted so should
+                    // be skipped.
+                    if ("${env.CI_AVOID_SPELLCHECK}" == "true") {
+                        shRes = sh (returnStatus: true, script: "make -k -s -j 8 spellcheck 2>/dev/null >/dev/null; make -k -s spellcheck")
+                        switch (shRes) {
+                            case 0:
+                                msg = "Spellcheck passed"
+                                manager.addShortText(msg)
+                                echo msg
+                                break
+
+                            default:
+                                msg = "Spellchecker had concerns"
+                                manager.addShortText(msg)
+                                echo msg
+                                unstable(msg)
+                                break
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

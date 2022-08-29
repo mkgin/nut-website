@@ -3,18 +3,57 @@ Welcome
 
 The primary goal of the Network UPS Tools (NUT) project is to provide support
 for Power Devices, such as Uninterruptible Power Supplies, Power Distribution
-Units, Automatic Transfer Switch, Power Supply Units and Solar Controllers.
+Units, Automatic Transfer Switches, Power Supply Units and Solar Controllers.
+NUT provides a common protocol and set of tools to monitor and manage such
+devices, and to consistently name equivalent features and data points, across
+a vast range of vendor-specific protocols and connection media types.
 
 NUT provides many control and monitoring link:features.html[features], with a
 uniform control and management interface. If you are just getting acquainted
 with NUT, link:features.html[that page] also explains the technical design
 and some possible set-ups.
 
-More than 140 different manufacturers, and several thousands of models are
+More than 170 different manufacturers, and several thousands of models are
 link:stable-hcl.html[compatible].
 
+//////////////////////////////////
+TODO: Automate the number above with Makefile magic and asciidoc variables
+or a .in style template parsing
+
+# Manufacturers:
+:; grep -E '^"' nut/data/driver.list.in | awk -F'"' '{print $2}' | sort | uniq | wc -l
+
+# Models:
+:; grep -E '^"' nut/data/driver.list.in | awk -F'"' '{print $2" "$8" "$10}' | sort | uniq -c | wc -l
+//////////////////////////////////
+
+
 This software is the combined effort of many
-link:acknowledgements.html[individuals and companies].
+link:acknowledgements.html[individuals and companies]
+with free and open source code licensed under the terms of GNU Public License
+(GPL), see link:https://github.com/networkupstools/nut/blob/master/COPYING[the
+NUT license text] for specific details.
+
+[NOTE]
+.Two NUT websites
+====
+The link:https://networkupstools.org/[main NUT site] should closely follow
+current development, with documentation most relevant for users who build NUT
+from link:https://github.com/networkupstools/nut/[source code].
+
+link:https://networkupstools.org/historic/[Sub-sites] are available for some
+historic releases for users of NUT packaged with their operating system
+distributions. Such packages are typically based on official releases of
+NUT at the time of distribution, and may lag behind current development
+in terms of features, capabilities, bug-fixes and supported devices.
+
+Some data, such as devices with known support at the time of release, are
+published to reflect both current development and historic releases; other
+data such as the NUT DDL or source archives are release-agnostic and only
+published once and for all.
+====
+
+include::historic-release.txt[]
 
 News
 ----

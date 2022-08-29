@@ -1,3 +1,9 @@
+# NOTE: Syntax relies on GNU Make; YMMV with other implementations
+
+# Also relies on GNU `ln -fsr` options, for historic sub-site publication
+LN = ln
+#LN = gln
+
 # Tell aclocal in what directory it should look for macros
 ACLOCAL_AMFLAGS = -I nut/m4
 
@@ -58,6 +64,7 @@ WEBSITE_FILES =	\
 	ups-protocols.html
 
 WEBSITE_DEPS =	\
+	nut/docs/solaris-usb.html	\
 	nut/docs/cables.pdf	\
 	nut/docs/developer-guide.chunked	\
 	nut/docs/developer-guide.pdf	\
@@ -73,16 +80,17 @@ LAYOUT = web-layout
 
 ADOC_PARAMS_COMMON =	\
 	--backend=xhtml11	\
-	--conf-file=$(srcdir)/$(LAYOUT).conf	\
+	--conf-file="$(srcdir)/$(LAYOUT).conf"	\
 	--attribute icons	\
 	--attribute linkcss	\
 	--attribute=badges	\
 	--attribute=website	\
 	--attribute=quirks	\
-	--attribute=revision=$(PACKAGE_VERSION)	\
-	--attribute tree_version=@TREE_VERSION@	\
-	--attribute localdate=`TZ=UTC date +%Y-%m-%d`	\
-	--attribute localtime=`TZ=UTC date +%H:%M:%S`	\
+	--attribute=revision="$(PACKAGE_VERSION)"	\
+	--attribute=webrevision="$(WEBSITE_VERSION)"	\
+	--attribute tree_version="@TREE_VERSION@"	\
+	--attribute localdate="`TZ=UTC date +%Y-%m-%d`"	\
+	--attribute localtime="`TZ=UTC date +%H:%M:%S`"	\
 	--attribute=date="`TZ=UTC date`"
 
 ASCIIDOC_PARAMS =	\
@@ -90,7 +98,35 @@ ASCIIDOC_PARAMS =	\
 	--attribute iconsdir=$(srcdir)/images	\
 	--attribute scriptsdir=$(srcdir)/scripts
 
-OUTDIR = output
+OUTDIR_BASE = @OUTDIR_BASE@
+NUT_HISTORIC_RELEASE = @NUT_HISTORIC_RELEASE@
+
+if WITH_NUT_HISTORIC_RELEASE
+# Do not build/publish DDL or the HISTORIC_DIR inside historic sub-sites
+HISTORIC_DEPS =
+OUTDIR = $(OUTDIR_BASE)/$(HISTORIC_DIR)/$(NUT_HISTORIC_RELEASE)
+
+# Embedding a leading space as an HTML entity, otherwise asciidoc strips it:
+ADOC_PARAMS_COMMON +=	\
+	--attribute=nuttitlesuffix='&\#32;(as of $(NUT_HISTORIC_RELEASE))'
+else
+HISTORIC_DEPS = \
+	$(PACKAGE_DIR_TARGETS)	\
+	$(SOURCE_DIR_TARGETS)	\
+	$(DDL_DIR)/index.html	\
+	$(HISTORIC_DIR)/index.html
+OUTDIR = $(OUTDIR_BASE)
+ADOC_PARAMS_COMMON +=	\
+	--attribute=nuttitlesuffix=""
+endif
+
+if WITH_NUT_HISTORIC_RELEASE
+.git-commit-website:
+	@echo ":; git commit -m 'Regenerate historic $(NUT_HISTORIC_RELEASE) sub-site `date -u +%Y%m%dT%H%M%SZ` vs nut commit `(cd nut && git log -1 --format=%h)`, nut-ddl commit `(cd ddl && git log -1 --format=%h)` and nut-website commit `(git log -1 --format=%h)`'" > .git-commit-website
+else
+.git-commit-website:
+	@echo ":; git commit -m 'Regenerate site `date -u +%Y%m%dT%H%M%SZ` vs nut commit `(cd nut && git log -1 --format=%h)`, nut-ddl commit `(cd ddl && git log -1 --format=%h)` and nut-website commit `(git log -1 --format=%h)`'" > .git-commit-website
+endif
 
 all:	\
 	prerequisites	\
@@ -100,34 +136,53 @@ all:	\
 	$(CABLE_IMAGE_FILES)	\
 	$(LAYOUT_FILES)	\
 	$(SCRIPT_FILES)	\
-	$(DDL_DIR)/index.html	\
-	$(PACKAGE_DIR_TARGETS)	\
-	$(SOURCE_DIR_TARGETS)	\
+	$(HISTORIC_DEPS)	\
+	$(HISTORIC_DIR)/index.html	\
 	scripts/ups_data.js	\
 	ups-html.txt	\
+	.git-commit-website	\
 	$(OUTDIR)
+	@echo "SUCCESS: The website content in output directory is now prepared for deployment." >&2
+	@echo "Please see the README for instructions about publishing to master site and" >&2
+	@echo "    occasionally updating the news (index.html) on the main site" >&2
+	@echo "Comment the commits to master site like this:"
+	@cat .git-commit-website
+# Regenerate site 2020-12-21 vs nut commit 46c7da76 and nut-website commit f1992f6f
 
 release: dist-files all
 
-# Generate WEBSITE_DEPS & man pages
+# Generate WEBSITE_DEPS & HTML versions of man pages
 prerequisites:
-	cd nut/docs; $(MAKE) $(AM_MAKEFLAGS) html-chunked pdf
-	cd nut/docs; $(MAKE) $(AM_MAKEFLAGS) FAQ.html
-	cd nut/docs/man; $(MAKE) $(AM_MAKEFLAGS) html-man
+	cd nut/docs/man && $(MAKE) $(AM_MAKEFLAGS) html-man
+	cd nut/docs && $(MAKE) $(AM_MAKEFLAGS) html-chunked pdf FAQ.html solaris-usb.html
 
-# Generate distribution files and GPG fingerprint (really needed?) and copy them in source dir
-dist-files:
-	cd nut; $(MAKE) $(AM_MAKEFLAGS) dist dist-hash dist-sig
+# Generate distribution files and GPG fingerprint (really needed?)
+# and copy them in source dir, once (keep old published releases
+# immutable by default - let maintainer clean away corrupt attempts)!
+dist-files: $(SOURCE_DIR)/@TREE_VERSION@/nut-@TARBALL_VERSION@.tar.gz
+
+# Separate chore for maintainers with a key
+dist-sig-files: $(SOURCE_DIR)/@TREE_VERSION@/nut-@TARBALL_VERSION@.tar.gz.sig
+
+$(SOURCE_DIR)/@TREE_VERSION@/nut-@TARBALL_VERSION@.tar.gz:
+	cd nut && rm -f nut-*.tar.gz*
+	cd nut && $(MAKE) $(AM_MAKEFLAGS) dist dist-hash
 	$(MKDIR_P) $(SOURCE_DIR)/@TREE_VERSION@
-	cp -f nut/nut-$(PACKAGE_VERSION).tar.gz $(SOURCE_DIR)/@TREE_VERSION@/
-	cp -f nut/nut-$(PACKAGE_VERSION).tar.gz.md5 $(SOURCE_DIR)/@TREE_VERSION@/
-	cp -f nut/nut-$(PACKAGE_VERSION).tar.gz.sha256 $(SOURCE_DIR)/@TREE_VERSION@/
-	cp -f nut/nut-$(PACKAGE_VERSION).tar.gz.sig $(SOURCE_DIR)/@TREE_VERSION@/
+	cp -f nut/nut-@TARBALL_VERSION@.tar.gz $(SOURCE_DIR)/@TREE_VERSION@/
+	cp -f nut/nut-@TARBALL_VERSION@.tar.gz.md5 $(SOURCE_DIR)/@TREE_VERSION@/
+	cp -f nut/nut-@TARBALL_VERSION@.tar.gz.sha256 $(SOURCE_DIR)/@TREE_VERSION@/
+	cd $(SOURCE_DIR)/@TREE_VERSION@/ && md5sum -c nut-@TARBALL_VERSION@.tar.gz.md5
+	cd $(SOURCE_DIR)/@TREE_VERSION@/ && sha256sum -c nut-@TARBALL_VERSION@.tar.gz.sha256
 	cp -f nut/NEWS $(SOURCE_DIR)/@TREE_VERSION@/new-$(PACKAGE_VERSION).txt
 	cp -f nut/ChangeLog $(SOURCE_DIR)/@TREE_VERSION@/
+
+# Separate chore for maintainers with a key
+$(SOURCE_DIR)/@TREE_VERSION@/nut-@TARBALL_VERSION@.tar.gz.sig: $(SOURCE_DIR)/@TREE_VERSION@/nut-@TARBALL_VERSION@.tar.gz
+	cd nut && $(MAKE) $(AM_MAKEFLAGS) dist-sig
+	cp -f nut/nut-@TARBALL_VERSION@.tar.gz.sig $(SOURCE_DIR)/@TREE_VERSION@/
 	gpg --export -a 0x55CA5976 > $(SOURCE_DIR)/nut-key.gpg
 
-$(WEBSITE_FILES): $(LAYOUT).conf
+$(WEBSITE_FILES): $(LAYOUT).conf historic-release.txt
 
 images/:
 	$(MKDIR_P) images
@@ -156,25 +211,33 @@ $(OUTDIR):
 	cp -f protocols/*.html $(OUTDIR)/protocols/
 	cp -fR protocols/images $(OUTDIR)/protocols
 	cp -fR protocols/static/* $(OUTDIR)/protocols/
-	$(MKDIR_P) $(OUTDIR)/$(DDL_DIR)
-	cp -f $(DDL_DIR)/index.html $(OUTDIR)/$(DDL_DIR)
-	manufacturers="$(patsubst $(DDL_DIR)/%/,%,$(MANUFACTURERS))";	\
-	for mfr in $${manufacturers}; do	\
-		$(MKDIR_P) "$(OUTDIR)/$(DDL_DIR)/$${mfr}/raw";	\
-		cp -f $(DDL_DIR)/$${mfr}/*.html $(OUTDIR)/$(DDL_DIR)/$${mfr}/;	\
-	done
-	rawfiles="$(wildcard $(DDL_DIR)/*/*.dev $(DDL_DIR)/*/*.seq $(DDL_DIR)/*/*.nds)";	\
-	for rawfile in $${rawfiles}; do	\
-		cp -f "$${rawfile}" "$(OUTDIR)/$${rawfile%/*}/raw/$${rawfile##*/}";	\
-	done
-	$(MKDIR_P) $(patsubst %,"$(OUTDIR)/%",$(PACKAGE_DIRS))
-	for item in $(PACKAGE_DIR_TARGETS) $(PACKAGE_DIR_FILES); do	\
-		cp -f "$${item}" "$(OUTDIR)/$${item}";	\
-	done
-	$(MKDIR_P) $(patsubst %,"$(OUTDIR)/%",$(SOURCE_DIRS))
-	for item in $(SOURCE_DIR_TARGETS) $(SOURCE_DIR_FILES); do	\
-		cp -f "$${item}" "$(OUTDIR)/$${item}";	\
-	done
+	if [ x"$(NUT_HISTORIC_RELEASE)" = x ]; then	\
+		$(MKDIR_P) "$(OUTDIR)/$(HISTORIC_DIR)" &&	\
+		cp -f "$(HISTORIC_DIR)/index.html" "$(OUTDIR)/$(HISTORIC_DIR)/index.html" || exit ;	\
+		$(MKDIR_P) $(OUTDIR)/$(DDL_DIR) || exit ;	\
+		cp -f $(DDL_DIR)/index.html $(OUTDIR)/$(DDL_DIR) || exit ;	\
+		manufacturers="$(patsubst $(DDL_DIR)/%/,%,$(MANUFACTURERS))";	\
+		for mfr in $${manufacturers}; do	\
+			$(MKDIR_P) "$(OUTDIR)/$(DDL_DIR)/$${mfr}/raw" || exit;	\
+			cp -f $(DDL_DIR)/$${mfr}/*.html $(OUTDIR)/$(DDL_DIR)/$${mfr}/ || exit;	\
+		done ;	\
+		rawfiles="$(wildcard $(DDL_DIR)/*/*.dev $(DDL_DIR)/*/*.seq $(DDL_DIR)/*/*.nds)";	\
+		for rawfile in $${rawfiles}; do	\
+			cp -f "$${rawfile}" "$(OUTDIR)/$${rawfile%/*}/raw/$${rawfile##*/}" || exit;	\
+		done || exit ;	\
+		$(MKDIR_P) $(patsubst %,"$(OUTDIR)/%",$(PACKAGE_DIRS)) || exit;	\
+		for item in $(PACKAGE_DIR_TARGETS) $(PACKAGE_DIR_FILES); do	\
+			cp -f "$${item}" "$(OUTDIR)/$${item}";	\
+		done || exit ;	\
+		$(MKDIR_P) $(patsubst %,"$(OUTDIR)/%",$(SOURCE_DIRS)) || exit;	\
+		for item in $(SOURCE_DIR_TARGETS) $(SOURCE_DIR_FILES); do	\
+			cp -f "$${item}" "$(OUTDIR)/$${item}";	\
+		done || exit ;	\
+	else	\
+		( cd $(OUTDIR) && $(LN) -fsr $(abs_top_builddir)/$(OUTDIR_BASE)/$(DDL_DIR)/ . ) || exit ; \
+		( cd $(OUTDIR) && $(LN) -fsr $(abs_top_builddir)/$(OUTDIR_BASE)/package/ . ) || exit ; \
+		( cd $(OUTDIR) && $(LN) -fsr $(abs_top_builddir)/$(OUTDIR_BASE)/source/ . ) || exit ; \
+	fi
 
 clean-local:
 	cd nut && $(MAKE) $(AM_MAKEFLAGS) clean
@@ -186,15 +249,22 @@ clean-local:
 		$${ddlfiles}	\
 		$(DDL_DIR)/index.txt	\
 		$(DDL_DIR)/index.html	\
+		$(HISTORIC_DIR)/index.html	\
 		$(PACKAGE_DIR_TARGETS_RAW)	\
 		$(PACKAGE_DIR_TARGETS)	\
 		$(SOURCE_DIR_TARGETS_RAW)	\
 		$(SOURCE_DIR_TARGETS)	\
 		$(WEBSITE_FILES)	\
 		$(OUTDIR)	\
+		.git-commit-website     \
 		images/	\
 		ups-html.txt	\
 		scripts/ups_data.js
+	git checkout -f images || true
+	rm -f *-spellchecked protocols/*-spellchecked
+	rm -f tools/nut-ddl.py tools/nut-hclinfo.py
+	rm -f historic-release.txt
+	rm -f .git-commit-website
 
 # HCL depends on:
 # - NUT's data/driver.list.in
@@ -203,7 +273,13 @@ clean-local:
 # - DDL manufacturers and models
 ups-html.txt scripts/ups_data.js: nut/data/driver.list.in $(srcdir)/tools/nut-hclinfo.py $(MFR_TARGETS) | prerequisites
 	cd nut/data && $(MAKE) $(AM_MAKEFLAGS) driver.list
-	@if python -c "import json,simplejson,lxml"; then	\
+	@if \
+	    python3 -c "import json,lxml"	\
+	 || python -c "import simplejson,lxml"	\
+	 || python -c "import json,lxml"	\
+	 || python2 -c "import simplejson,lxml"	\
+	 || python2 -c "import json,lxml"	\
+	; then	\
 		echo "Regenerating the HTML and JSON formated HCL tables.";	\
 		cd tools/ && ./nut-hclinfo.py;	\
 	else	\
@@ -214,34 +290,36 @@ ups-html.txt scripts/ups_data.js: nut/data/driver.list.in $(srcdir)/tools/nut-hc
 		echo "----------------------------------------------------------------------";	\
 	fi
 
-index.html: website.txt news.txt
+# Report each rebuild by depending on the Makefile
+index.html: website.txt news.txt Makefile $(LAYOUT).conf historic-release.txt
 	$(ASCIIDOC) $(ASCIIDOC_PARAMS) -o $@ -a index-only $<
 
-acknowledgements.html: nut/docs/acknowledgements.txt
+acknowledgements.html: nut/docs/acknowledgements.txt $(LAYOUT).conf historic-release.txt
 	$(ASCIIDOC) $(ASCIIDOC_PARAMS) -o $@ $<
 
-cables.html: nut/docs/cables.txt
+cables.html: nut/docs/cables.txt $(LAYOUT).conf historic-release.txt
 	$(ASCIIDOC) $(ASCIIDOC_PARAMS) -o $@ -a toc $<
 
-download.html: nut/docs/download.txt
+# React to newly published sources
+download.html: nut/docs/download.txt source/*/*.tar.gz* $(LAYOUT).conf historic-release.txt
 	$(ASCIIDOC) $(ASCIIDOC_PARAMS) -o $@ -a toc $<
 
-documentation.html: nut/docs/documentation.txt
+documentation.html: nut/docs/documentation.txt $(LAYOUT).conf historic-release.txt
 	$(ASCIIDOC) $(ASCIIDOC_PARAMS) -o $@ $<
 
-features.html: nut/docs/features.txt
+features.html: nut/docs/features.txt $(LAYOUT).conf historic-release.txt
 	$(ASCIIDOC) $(ASCIIDOC_PARAMS) -o $@ $<
 
-nut-qa.html: nut/docs/nut-qa.txt
+nut-qa.html: nut/docs/nut-qa.txt $(LAYOUT).conf historic-release.txt
 	$(ASCIIDOC) $(ASCIIDOC_PARAMS) -o $@ $<
 
-projects.html: projects.txt
+projects.html: projects.txt $(LAYOUT).conf historic-release.txt
 	$(ASCIIDOC) $(ASCIIDOC_PARAMS) -o $@ -a toc $<
 
-stable-hcl.html: stable-hcl.txt ups-html.txt
+stable-hcl.html: stable-hcl.txt ups-html.txt $(LAYOUT).conf historic-release.txt
 	$(ASCIIDOC) $(ASCIIDOC_PARAMS) -o $@ -a hcl $<
 
-support.html: nut/docs/support.txt
+support.html: nut/docs/support.txt $(LAYOUT).conf historic-release.txt
 	$(ASCIIDOC) $(ASCIIDOC_PARAMS) -o $@ $<
 
 SUFFIXES = .txt .html
@@ -281,6 +359,8 @@ SP := $(EMPTY) $(EMPTY)
 COMMA := ,
 # Percent sign
 PCT := %
+# A dollar
+DOLLAR := $$
 
 # For DDL generation, we need secondary expansion; enable it from now on:
 .SECONDEXPANSION:
@@ -290,7 +370,9 @@ PCT := %
 # - $(2): text
 file = $(shell echo "$(subst ",\",$(2))" $(firstword $(1)) "$(wordlist 2,$(words $(1)),$(1))")
 
-## DLL settings
+HISTORIC_DIR := historic
+
+## DDL settings
 # Device Dumps Library directory
 DDL_DIR := ddl
 # Directories to ignore in DDL
@@ -342,7 +424,7 @@ $(MODELS_TARGETS_RAW): $$(patsubst %,$$(subst %,\%,$$(dir $$@))%.txt,$$(subst @,
 MODELS_TARGETS := $(patsubst %.txt,%.html,$(MODELS_TARGETS_RAW))
 
 # Compiled asciidoc pages (.html):
-$(MODELS_TARGETS): $$(patsubst %.html,%.txt,$$@) $(LAYOUT).conf
+$(MODELS_TARGETS): $$(patsubst %.html,%.txt,$$@) $(LAYOUT).conf historic-release.txt
 	$(ASCIIDOC) $(ADOC_PARAMS_DDL_L2) --attribute toc -o "$@" "$<"
 
 ## Pages to build for each manufacturer
@@ -361,7 +443,7 @@ $(DDL_DIR)/%/index.txt: $$(shell export LC_ALL=C && printf "$$(PCT)s\n" $$(addsu
 	$(foreach MODEL,$^,$(call file,>> $@,- link:+++$(subst %,%25,$(basename $(notdir $(MODEL)))).html+++[$(subst _,$(SP),$(basename $(notdir $(MODEL))))]))
 
 # Compiled asciidoc pages (.html)
-$(DDL_DIR)/%/index.html: $(DDL_DIR)/%/index.txt $(LAYOUT).conf
+$(DDL_DIR)/%/index.html: $(DDL_DIR)/%/index.txt $(LAYOUT).conf historic-release.txt
 	$(ASCIIDOC) $(ADOC_PARAMS_DDL_L2) -o "$@" "$<"
 
 ## DDL home
@@ -383,10 +465,13 @@ $(DDL_DIR)/index.txt: $(DDL_DIR)/README.adoc $(MFR_TARGETS)
 	$(call file,>> $@,include::$(notdir $<)[])
 
 # Compiled asciidoc page (.html)
-$(DDL_DIR)/index.html: $(DDL_DIR)/index.txt $(LAYOUT).conf
+$(DDL_DIR)/index.html: $(DDL_DIR)/index.txt $(LAYOUT).conf historic-release.txt
 	$(ASCIIDOC) $(ADOC_PARAMS_DDL_L1) --attribute toc -o $@ $<
 
 ###
+
+$(HISTORIC_DIR)/index.html: $(HISTORIC_DIR)/index.txt $(LAYOUT).conf historic-release.txt
+	$(ASCIIDOC) $(ADOC_PARAMS_DDL_L1) --attribute toc -o $@ $<
 
 ### Package and source directories indexer
 
@@ -442,16 +527,24 @@ SOURCE_DIR_TARGETS_RAW := $(addsuffix index.txt,$(SOURCE_DIRS))
 PACKAGE_DIR_TARGETS := $(addsuffix index.html,$(PACKAGE_DIRS))
 SOURCE_DIR_TARGETS := $(addsuffix index.html,$(SOURCE_DIRS))
 
-# Raw asciidoc indices (.txt)
+# Raw asciidoc indices (.txt) for locations not caught by rules above
 # Note: if a file named README{.adoc,.txt,} exists in the same directory (precedence in case there are more than one file with different suffixes: README.adoc -> README.txt -> README), it is included in index.txt
-%/index.txt: $$(shell export LC_ALL=C && printf "$$(PCT)s\n" $$(patsubst $$(PCT),"$$(PCT)",$$(filter-out $$(sort $$*/ $$(addprefix $$*/,$$(IGNORE_PACKAGESOURCE_FILES) $$(addsuffix /,$$(IGNORE_PACKAGESOURCE_DIRS)))),$$(wildcard $$*/*/))) | sort -f -)
+
+# For the sorted listing below, assuming we have the "dir" and "dir/"
+# showing up in such order, leave only the slashed variant in place;
+# separated because somehow its markup (or length?) in-place confused
+# "make":
+FILTER_DIRONCE = awk 'BEGIN {o=""} ; { if ($(DOLLAR)0 == o"/") { print $(DOLLAR)0 } else { print o } ; o=$(DOLLAR)0; next; }'
+
+%/index.txt: $$(shell export LC_ALL=C && printf "$$(PCT)s\n" $$(patsubst $$(PCT),"$$(PCT)",$$(filter-out $$(sort $$*/ $$(addprefix $$*/,$$(IGNORE_PACKAGESOURCE_FILES) $$(addsuffix /,$$(IGNORE_PACKAGESOURCE_DIRS)))),$$(wildcard $$*/*/ $$*/*))) | sort -f - | $$(FILTER_DIRONCE) )
+	@echo "Generating $@ due to: $^"
 	$(call file,> $@,= Index of /$*)
 	$(call file,>> $@,:root:		$(subst $(SP),$(EMPTY),$(patsubst %,../,$(subst /,$(SP),$*))))
 	$(call file,>> $@,:iconsdir:	{root}images)
 	$(call file,>> $@,:scriptsdir:	{root}scripts)
 	$(call file,>> $@,:stylesdir:	{root}css)
 	$(call file,>> $@,)
-	$(call file,>> $@,TIP:	An always up-to-date version of this directory can be found following link:$(subst %,%25,https://github.com/networkupstools/nut-$(firstword $(subst /,$(SP),$*))-archive$(patsubst $(subst %,\%,$(firstword $(subst /,$(SP),$*)))%,%,$*))[this link].)
+	$(call file,>> $@,TIP:	An always up-to-date version of this directory can be found following link:$(subst %,%25,https://github.com/networkupstools/nut-$(firstword $(subst /,$(SP),$*))-archive/tree/master$(patsubst $(subst %,\%,$(firstword $(subst /,$(SP),$*)))%,%,$*))[this link].)
 	$(call file,>> $@,)
 	$(foreach README,$(if $(wildcard $*/README.adoc),README.adoc,$(if $(wildcard $*/README.txt),README.txt,$(if $(wildcard $*/README),README))),$(call file,>> $@,include::$(README)[]))
 	$(call file,>> $@,)
@@ -462,7 +555,8 @@ SOURCE_DIR_TARGETS := $(addsuffix index.html,$(SOURCE_DIRS))
 	$(call file,>> $@,|====)
 
 # Compiled asciidoc indices (.html)
-%/index.html: %/index.txt $$(if $$(wildcard $$*/README.adoc),$$*/README.adoc,$$(if $$(wildcard $$*/README.txt),$$*/README.txt,$$(if $$(wildcard $$*/README),$$*/README))) $(LAYOUT).conf
+%/index.html: %/index.txt $$(if $$(wildcard $$*/README.adoc),$$*/README.adoc,$$(if $$(wildcard $$*/README.txt),$$*/README.txt,$$(if $$(wildcard $$*/README),$$*/README))) $(LAYOUT).conf historic-release.txt
+	@echo "Generating $@ due to: $^"
 	$(ASCIIDOC) $(ADOC_PARAMS_COMMON) -o "$@" "$<"
 
 SPELLCHECK_SRC = \

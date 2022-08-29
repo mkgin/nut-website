@@ -8,6 +8,7 @@ autom4te.cache
 config.log
 config.status
 configure
+confdefs.h
 install-sh
 Makefile
 Makefile.in
@@ -15,6 +16,13 @@ missing
 
 # NUT Website-specific
 ups-html.txt
+historic-release.txt
+.git-commit-website
+*.txt-spellchecked
+*.asciidoc-spellchecked
 /images/
 /output/
 /*.html
+
+# Auto-published site
+/networkupstools.github.io

@@ -2,31 +2,35 @@ Network UPS Tools website
 =========================
 
 This repository contains the scripts needed to generate the
-http://www.networkupstools.org[NUT website]. Since it was originally part of
-the https://github.com/networkupstools/nut/[NUT source tree], it shares some
-history, and you can save some bandwidth if you already have a copy of the NUT
-repository downloaded:
+link:http://www.networkupstools.org[NUT website].
+
+Since it was originally part of the
+link:https://github.com/networkupstools/nut/[NUT source tree],
+it shares some history, and you can save some bandwidth if you
+already have a copy of the NUT repository downloaded:
 
 ----
-$ git clone --reference /path/to/nut https://github.com/networkupstools/nut-website.git
+:; git clone --reference /path/to/nut \
+    https://github.com/networkupstools/nut-website.git
 ----
 
 Once you have cloned the nut-website repository, you can initialize the
 submodules, and pull your copy of NUT into the website tree as well:
 
 ----
-$ git submodule init
+:; git submodule init
 Submodule 'ddl' (https://github.com/networkupstools/nut-ddl.git) registered for path 'ddl'
 Submodule 'nut' (https://github.com/networkupstools/nut.git) registered for path 'nut'
-$ git submodule update --reference /path/to/nut nut
+:; git submodule update --reference /path/to/nut nut
 ...
 ----
 
 Required Packages
 -----------------
 
-You will need a copy of `AsciiDoc`, `a2x` (part of AsciiDoc), and its dependencies
-(`dblatex`, `xmllint`, and `xsltproc`). Current version requirements will be
+You will need a copy of `AsciiDoc` toolkit, `a2x` (part of AsciiDoc), and
+its dependencies for MAN, HTML and PDF document formats generation (including
+`dblatex`, `xmllint`, and `xsltproc`). Current version requirements will be
 listed in the output of the `./configure` script. To build the Hardware
 Compatibility List (HCL) page, you will need either the `simplejson` or `json`
 Python module (the json module that comes with Python 2.7 will work) and the
@@ -42,11 +46,93 @@ non-portable constructs in the Makefiles, please let us know.
 Building
 --------
 
+Quick builds for CI and developer iterations
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Main rituals for re-builds should now be handled well by a single script:
+
 ----
-$ ./autogen.sh && ./configure && make
+:; ./ci_build.sh
 ----
 
+For maintainers (or CI agents) who may push the web-site codebase, further
+envvars may be useful to commit changes locally, and to push index upwards:
+
+----
+# To publish automatically use:
+:;   export CI_AUTOCOMMIT=true
+:;   export CI_AUTOPUSH=true
+
+# Optionally (on CI) to avoid rebuilds in cases when Git sources did not
+# change after a pull of all nut-website and submodule HEADs (returns exit
+# code "42" then, to be handled by the caller):
+:;   export CI_AVOID_RESPIN=true
+
+# Optionally - for the rare historic-release sub-sites (by NUT tag), e.g.:
+:;   export NUT_HISTORIC_RELEASE=v2.7.4
+----
+
+Manual building in detail
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+----
+:; ./autogen.sh && ./configure && { make -k ; make ; }
+----
+
+NOTE: There are currently some issues with parallel builds (e.g. `protocols`
+sub-directory should be built before `OUTDIR` but target dependencies do not
+say so). Please run `make` sequentially for the time being.
+
 The root of the website will be in the `output/` directory, if all goes well.
+
+Building release-version sites
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Every once in a while NUT has releases :) and those end up packaged in many
+operating system distributions or equivalent bundles of binary code, and are
+used by the majority of NUT users.
+
+While the main nut-website now aims to follow the active development based on
+current "master" or "main" branches of the components involved, we also publish
+reference sub-sites with static data (man pages, configuration, compatibility
+information, etc.) for those people to see about setting up their practical
+systems properly. Such pages are marked with a note on top that they represent
+an old and immutable codebase which may differ from modern project state.
+
+This also impacts some but not all pages of the nut-website as well -- e.g.
+the `stable-hcl.txt` file which is a wrapper to include `nut/data/driver.list`
+info, but not all of the main website files currently (just because it is too
+cumbersome to partially check out arbitrary old codebase to build with current
+updated recipes). Likewise, general markup and footers, etc. remain from the
+current nut-website codebase at the time of (re-)generation.
+
+In particular, the NUT DDL pertains to all NUT releases (reports the tested
+release in the filenames) so is not published separately per historic release.
+
+Normally this should be done once per release, with a call like this:
+
+----
+:; export NUT_HISTORIC_RELEASE=v2.7.4
+:; ./autogen.sh && \
+    ./configure --with-NUT_HISTORIC_RELEASE=${NUT_HISTORIC_RELEASE} && \
+    { make -k dist-sig-files || make dist-files; } && \
+    { make -k ; make; }
+----
+
+Which would populate e.g. `output/historic/v2.7.4` subdirectory that would be
+copied and committed into same-named path under `networkupstools.github.io` as
+detailed below. Generation of the main nut-website would also populate an index
+file of the "historic" subdirectory, based on `historic/index.txt` contents,
+to refer to such officially published snapshots. This index is currently
+maintained manually, to ensure human decision about publishing (or hiding) an
+historic release (especially a release candidate) vs. experimenting with that.
+
+NOTE: `make dist-files` should update the historic release site source tarballs
+and related ChangeLog, news and checksum files IFF the release data was not yet
+there. You probably need to commit that back to "source" github repository.
+
+NOTE: For hardcore maintainers, there should be a PGP/GPG key to also sign the
+release tarball, calling `make dist-sig-files` (would fail without a key).
 
 Publishing
 ----------
@@ -54,25 +140,62 @@ Publishing
 NOTE: These are internal notes for the maintainers.
 
 The build result is published to the
-https://github.com/networkupstools/networkupstools.github.io[NUT github.io repository]
+https://github.com/networkupstools/networkupstools-master.github.io[NUT
+github.io master site repository]
+as well as news maintenance on
+https://github.com/networkupstools/networkupstools.github.io[NUT
+github.io latest-release site repository]
 
-Hence, the publication is as easy as:
+Hence, the rolling master site publication is as easy as:
 
 ----
-$ git clone https://github.com/networkupstools/networkupstools.github.io
-$ cp -R ./output/* /path/to/networkupstools.github.io/
+:; git clone https://github.com/networkupstools/networkupstools-master.github.io
+:; rsync -avPHK ./output/* /path/to/networkupstools-master.github.io/
 ----
 
+Release site publication is much less frequent. It follows the master
+site guideline when making a release, but only requires updating the
+`index.html` file when `news.txt` is updated, as noted below.
+
+NOTE: Be careful to use `git mergetool -y` to merge the updates from
+a newly generated `index.html` into the release site, to keep intact
+the title (marked with comments) which specifies the type of site.
+
+----
+:; git clone https://github.com/networkupstools/networkupstools.github.io
+:; cp -R ./output/index.html /path/to/networkupstools.github.io/
+:; (cd /path/to/networkupstools.github.io/ && git difftool -y)
+----
+
+NOTE: Maybe also update the `ddl` and `stable-hcl.html` on master site,
+as its updates often reflect newly confirmed support of devices by
+existing NUT releases.
 
 Updates
 -------
 
-If you only have a small patch (fixing a typo or wording), don't feel obliged
-to install all of the dependencies just to test it. Feel free to create a pull
-request on this repository, or send the patch as an attachment to
-the http://www.networkupstools.org/support.html#_mailing_lists[nut-upsdev list]
-and we will submit it to the
-http://buildbot.networkupstools.org/public/nut/builders/Debian-website[Buildbot]
-queue. Buildbot publishes its results at http://new.networkupstools.org and
-the contents of that site will be copied to http://www.networkupstools.org
-for the next NUT release.
+If you only have a small patch (fixing a typo or wording), don't feel
+obliged to install all of the dependencies listed above just to test it.
+Feel free to create a pull request on this repository, or (less preferable
+as slower to process) send the patch as an attachment to the
+link:http://www.networkupstools.org/support.html#_mailing_lists[nut-upsdev list].
+
+Maintainer note: Publishing became part of NUT CI farm automation in 2022,
+so whenever master branch sources of relevant repositories are changed,
+the website should not lag behind too long. Needed behavior is defined in
+this repository in `Jenkinsfile-infra` file, with job history visible at
+https://ci.networkupstools.org/view/InfraTasks/job/nut-website/
+
+* As of this writing, changes of `nut-website` repository should get picked
+  up quickly thanks to "web hooks" sent by GitHub to NUT CI farm servers,
+  and changes in NUT, NUT-DDL and other repositories involved would be
+  evaluated every 3 hours.
+
+* (Re-)builds of historic sub-sites for release candidates etc. are handled
+  manually by maintainers, to publish source tarballs as well (in nut-source
+  repository, in the web-site, in GitHub releases page), and generally happen
+  once per such release with a spell like this:
++
+------
+:; CI_AUTOCOMMIT=true CI_AUTOPUSH=true NUT_HISTORIC_RELEASE=v2.8.0-rc3 ./ci_build.sh
+------

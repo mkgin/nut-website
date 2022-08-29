@@ -89,9 +89,13 @@ def buildData(deviceDataFile):
     deviceData = []
 
     try:
+        # Python 3.x
+        file = open(deviceDataFile, "r", encoding='utf-8')
+    except TypeError:
+        # Python 2.7
         file = open(deviceDataFile, "r")
     except IOError:
-        print "Cannot open", deviceDataFile
+        print ("Cannot open", deviceDataFile)
         exit(1)
 
     for line in file:
@@ -113,8 +117,8 @@ def buildData(deviceDataFile):
         row = re.findall(r'"([^"]*)",?', line)
 
         if len(row) != len(dataFields):
-            print "Warning: Unexpected number of fields in line: %s" % row
-            print "\tLine will be skipped."
+            print ("Warning: Unexpected number of fields in line: %s" % row)
+            print ("\tLine will be skipped.")
         else:
             deviceData.append(re.findall(r'"([^"]*)",?', line))
 
@@ -208,8 +212,8 @@ def buildHTMLTable(deviceData):
 
         # Devices are expected to have a specified number of fields
         if len(device) < len(dataFields):
-            print "Unexpected number of fields in device: %s" % device
-            print "Device will not be included in result set."
+            print ("Unexpected number of fields in device: %s" % device)
+            print ("Device will not be included in result set.")
             continue
 
         # Alternate CSS class if current manufacturer is different from the last
@@ -283,12 +287,22 @@ def buildHTMLTable(deviceData):
         for cell in row:
             attr = ""
             innerHTML = ""
-            for key, value in cell.iteritems():
-                val = unicode(str(value), "utf-8")
+            for key, value in cell.items():
+                try:
+                    val = str(value).encode("utf-8")
+                except UnicodeDecodeError:
+                    # 'ascii' codec can't decode byte 0xc2 in position 0: ordinal not in range(128)
+                    # input already non-ascii?
+                    val = str(value)
+
+                # decode "val" back, to avoid final markup like
+                #   <td class="b" hidden="">b'apc'</td>
+                # and have proper
+                #   <td class="hidden">apc</td>
                 if key != "text":
-                    attr += " %s='%s'" % (key, val)
+                    attr += " %s='%s'" % (key, val.decode('UTF-8'))
                 else:
-                    innerHTML = val
+                    innerHTML = val.decode('UTF-8')
 
             r.append(html.fromstring("<td%s>%s</td>" % (attr, innerHTML)))
 
@@ -312,7 +326,7 @@ try:
         if os.path.isfile(os.path.join(manDir, name)) and name.endswith(".html") and name != "index.html":
             manPages.append(name[:-5])
 except OSError:
-    print "Unable to get manpage list from '%s'" % manDir
+    print ("Unable to get manpage list from '%s'" % manDir)
 
 # List of DDL manufacturers and devices dumps
 ddl = {}
@@ -326,10 +340,36 @@ try:
             if os.path.isfile(os.path.join(path, child)) and child.endswith(".html") and child != "index.html":
                 ddl[name].append(child[:-5])
 except OSError:
-    print "Unable to get DDL manufacturers/devices from '%s'" % ddlDir
+    print ("Unable to get DDL manufacturers/devices from '%s'" % ddlDir)
 
 # Dump device data and manpage names as JSON
-jsonData = "var UPSData = %s, NUTManPages = %s, NUTddl = %s" % (json.dumps(deviceData, encoding="utf-8"), json.dumps(manPages, encoding="utf-8"), json.dumps(ddl, encoding="utf-8"))
+# Helper inspired by https://stackoverflow.com/a/67724314/4715872
+def json_loads(txt):
+    try:
+        # Approach used in older python, which was
+        # deprecated since 3.1, removed since 3.9
+        return json.loads(txt, encoding="utf-8")
+    except TypeError:
+        txt = txt.encode("utf-8")
+        value = json.loads(txt)
+        return value
+
+def json_dumps(txt):
+    try:
+        return json.dumps(txt, encoding="utf-8")
+    except TypeError:
+        try:
+            if isinstance(txt, list):
+                for entry in txt:
+                    entry = entry.encode("utf-8")
+            else:
+                txt = txt.encode("utf-8")
+        except:
+            print ("No utf8")
+        value = json.dumps(txt)
+        return value
+
+jsonData = "var UPSData = %s, NUTManPages = %s, NUTddl = %s" % (json_dumps(deviceData), json_dumps(manPages), json_dumps(ddl))
 
 # First, check if target directory exists
 dir = os.path.dirname(webJsonHCL)
@@ -343,20 +383,20 @@ try:
     file = open(webJsonHCL, "w")
     file.write(jsonData)
     file.close()
-    print "JSON HCL written"
+    print ("JSON HCL written: %s" % webJsonHCL)
 except IOError:
-    print "Unable to write JSON device data to %s" % webJsonHCL
+    print ("Unable to write JSON device data to %s" % webJsonHCL)
     exit(1)
 
 # Create HTML table from device data
 table = buildHTMLTable(deviceData)
 try:
-    file = open(webStaticHCL, "w")
-    file.write("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n")
+    file = open(webStaticHCL, "wb")
+    file.write("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n".encode(encoding='UTF-8'))
     file.write(table)
-    file.write("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n")
-    print "HTML HCL written"
+    file.write("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n".encode(encoding='UTF-8'))
+    print ("HTML HCL written: %s" % webStaticHCL)
 except IOError:
-    print "Unable to write HTML device table to %s" % webStaticHCL
+    print ("Unable to write HTML device table to %s" % webStaticHCL)
     exit(1)
 
